@@ -23,6 +23,7 @@ button:hover:not(:disabled){border-color:var(--am)}button:disabled{opacity:.4;cu
 <div class="g"><span></span><button data-op="f" title="W">Forward</button><span></span>
 <button data-op="l" title="Q">Hull ⟲</button><button data-op="b" title="S">Reverse</button><button data-op="r" title="E">Hull ⟳</button>
 <button data-op="tl" title="A">Turret ⟲</button><button data-op="fire" title="F">Fire</button><button data-op="tr" title="D">Turret ⟳</button></div>
+<div id="tgt" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:0 0 8px;font-size:13px"></div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px"><button id="end">End turn</button><button id="undo" disabled>Undo (Z)</button></div><div id="log"></div><div style="display:flex;gap:6px;margin-top:8px;align-items:center"><button id="snd">Sound: on</button><input id="vol" type="range" min="1" max="3" step="1" value="2" style="flex:1" title="Volume"></div>
 <label style="display:block;margin-top:8px">Zoom<input id="zoom" type="range" min="0.5" max="2.5" step="0.05" value="1" style="width:100%"></label>
 <button id="view" style="margin-top:8px">View: isometric</button></div>
@@ -46,7 +47,7 @@ PIVOT={LT:[0,2.66],MT:[0,1.91],HT:[0,1.91]}, // PIVOT = centre of the round hole
 TURRET_SCALE={MT:1.25};
 const MX=x=>9.5-x; // board file -> scene x (mirrored so files a..j run left to right from each player's side)
 const FILES={LT:['LT_Hull','LT_Turret'],MT:['MT_Hull','MT_Turret'],HT:['HT_Hull','HT_Turret'],TD:['TD'],A:['Arty']};
-const $=s=>document.querySelector(s);let zoom=1,game=null,tok=null,id=null,sel=null,es=null,off=0,iso=true,seat=0;
+const $=s=>document.querySelector(s);let zoom=1,game=null,tok=null,id=null,sel=null,es=null,off=0,iso=true,seat=0,pick=null; // pick = ids of enemy tanks offered as targets after pressing Fire
 const SND={click:'click-sound',move:'tank-move-rotate',turret:'tank-turret-rotate',shot:'tank-shot',kill:'tank-destroyed',miss:'ricochet',end:'end-turn-sound',undo:'undo-sound'};
 const AUD={};for(const k in SND){AUD[k]=new Audio('sounds/'+SND[k]+'.wav');AUD[k].preload='auto'}
 let shown=0,snd=localStorage.pcSnd!=='0',vol=+(localStorage.pcVol||2),lastEv=null;const VOL=[0,.25,.6,1];
@@ -96,7 +97,7 @@ function sync(){const ids=new Set(game.units.map(u=>u.id));
   for(const k in meshes)if(!ids.has(k)){scene.remove(meshes[k]);delete meshes[k]}
   for(const u of game.units){let g=meshes[u.id];if(!g){g=meshes[u.id]=build(u);g.userData.uid=u.id;g.traverse(o=>o.userData.uid=u.id);g.position.set(MX(u.x),0,u.y+.5);g.rotation.y=-u.h*Math.PI/4+FLIP*Math.PI;scene.add(g)}
     g.userData.tp=[MX(u.x),u.y+.5];g.userData.th=-u.h*Math.PI/4+FLIP*Math.PI;g.userData.to=-u.o*Math.PI/4;
-    g.userData.mat.emissive.set(sel===u.id?0x553300:0)}}
+    g.userData.mat.emissive.set(sel===u.id?0x553300:pick&&pick.includes(u.id)?0x992222:0)}}
 renderer.setAnimationLoop(()=>{for(const g of Object.values(meshes)){const d=g.userData;if(!d.tp)continue;
   g.position.x+=(d.tp[0]-g.position.x)*.25;g.position.z+=(d.tp[1]-g.position.z)*.25;g.rotation.y+=ang(d.th-g.rotation.y)*.25;
   if(d.turret)d.turret.rotation.y+=ang(d.to-d.turret.rotation.y)*.25}
@@ -129,9 +130,27 @@ refreshLobby();setInterval(refreshLobby,3000);
 const h=location.hash.slice(1).toUpperCase();fit();setCam();
 if(h){$('#code').value=h;if(localStorage['pc'+h])enter({id:h,token:localStorage['pc'+h]})}
 // play
-async function act(op,tid){if(!game||game.status!=='play'||game.turn!==seat)return;if(!sel&&op!=='undo'){$('#log').textContent='Click one of your tanks first';return}
+const RNG={A:[6,5],LT:[2,1],MT:[3,2],HT:[4,3],TD:[3,2]},DX=[0,1,1,1,0,-1,-1,-1],DY=[1,1,0,-1,-1,-1,0,1]; // must mirror server.js (S[..].g, DX, DY)
+function targetsOf(u){const dir=(u.h+u.o)%8,rng=RNG[u.t][dir%2],out=[];
+  for(let i=1;i<=rng;i++){const x=u.x+DX[dir]*i,y=u.y+DY[dir]*i;if(x<0||y<0||x>=10||y>=12)break;
+    const v=game.units.find(w=>w.x===x&&w.y===y);
+    if(u.t==='A'){if(v&&v.s!==u.s)out.push(v);continue}
+    if(v){if(v.s!==u.s)out.push(v);break}
+    if(FORT.includes(x+','+y))break}
+  return out}
+function clearPick(){if(!pick)return;pick=null;$('#tgt').textContent='';if(game)sync()}
+function fire(){ // one target: fire at once; two or more: let the player choose
+  const u=game&&game.status==='play'&&game.turn===seat&&sel&&game.units.find(v=>v.id===sel),c=game&&game.cur;
+  if(!u||(c&&c.fired))return act('fire');
+  const t=targetsOf(u);if(t.length<2)return act('fire');
+  pick=t.map(v=>v.id);sync();
+  const box=$('#tgt');box.textContent='Choose a target:';
+  for(const v of t){const b=document.createElement('button');b.textContent=v.t+' '+'abcdefghij'[v.x]+(v.y+1);b.onclick=()=>act('fire',v.id);box.append(b)}
+  $('#log').textContent='Several targets in the line of fire: click a highlighted tank or a button (Esc cancels)'}
+const run=op=>op==='fire'?fire():act(op);
+async function act(op,tid){clearPick();if(!game||game.status!=='play'||game.turn!==seat)return;if(!sel&&op!=='undo'){$('#log').textContent='Click one of your tanks first';return}
   const r=await post('act',{id,token:tok,uid:sel,op,tid});if(r.error)$('#log').textContent=r.error}
-document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>act(b.dataset.op));$('#end').onclick=()=>act('end');
+document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>run(b.dataset.op));$('#end').onclick=()=>act('end');
 $('#view').onclick=()=>{iso=!iso;$('#view').textContent='View: '+(iso?'isometric':'top-down');setCam();fit()};
 $('#zoom').oninput=e=>{zoom=+e.target.value;fit()};
 addEventListener('wheel',e=>{if(e.target.tagName==='CANVAS'){zoom=Math.min(2.5,Math.max(.5,zoom*(e.deltaY<0?1.1:.9)));$('#zoom').value=zoom;fit()}},{passive:true});
@@ -140,12 +159,12 @@ $('#snd').onclick=()=>{snd=!snd;localStorage.pcSnd=snd?1:0;$('#snd').textContent
 $('#snd').textContent='Sound: '+(snd?'on':'off');$('#vol').value=vol;
 $('#vol').oninput=e=>{vol=+e.target.value;localStorage.pcVol=vol;play('click')};
 const KEY={z:'undo',w:'f',s:'b',q:'l',e:'r',a:'tl',d:'tr',f:'fire',Enter:'end'};
-addEventListener('keydown',e=>{if(KEY[e.key]&&e.target.tagName!=='INPUT')act(KEY[e.key])});
+addEventListener('keydown',e=>{if(e.key==='Escape')clearPick();if(KEY[e.key]&&e.target.tagName!=='INPUT')run(KEY[e.key])});
 const ray=new T.Raycaster();
 renderer.domElement.onpointerdown=e=>{if(!game)return;ray.setFromCamera(new T.Vector2(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1),cam);
-  const hit=ray.intersectObjects(Object.values(meshes),true)[0];if(!hit)return;const u=game.units.find(v=>v.id===hit.object.userData.uid);if(!u)return;
-  if(u.s===seat){if(!game.cur||game.cur.id===u.id){sel=u.id;play('click')}sync()}else if(sel)act('fire',u.id)};
-function ui(){const g=game,mine=g.turn===seat;
+  const hit=ray.intersectObjects(Object.values(meshes),true)[0];if(!hit){clearPick();return}const u=game.units.find(v=>v.id===hit.object.userData.uid);if(!u)return;
+  if(u.s===seat){clearPick();if(!game.cur||game.cur.id===u.id){sel=u.id;play('click')}sync()}else if(sel)act('fire',u.id)};
+function ui(){const g=game,mine=g.turn===seat;if(pick&&(!mine||g.status!=='play'||(g.cur&&g.cur.fired)||!pick.every(i=>g.units.some(v=>v.id===i))))clearPick();
   $('#who').innerHTML=g.status==='waiting'?`Code <b>${g.id}</b>`:g.status==='over'?`<span class="${g.winner?'b':'o'}">${g.winner?'Blue':'Orange'}</span> wins`:`<span class="${g.turn?'b':'o'}">${g.turn?'Blue':'Orange'}</span> to move${mine?' (you)':''}`;
   const c=g.cur&&mine?g.cur:null,u=g.units.find(v=>v.id===(c?c.id:sel)),S={A:[1,2,0],LT:[3,3,3],MT:[2,3,2],HT:[2,2,1],TD:[2,1,0]}[u&&u.t];
   const N=g.names||['',''],pl=$('#pl');pl.textContent='';[0,1].forEach(i=>{const sp=document.createElement('span');sp.className=i?'b':'o';sp.textContent=(N[i]||'waiting…')+(i===seat?' (you)':'');if(i)pl.append(' vs ');pl.append(sp)});
