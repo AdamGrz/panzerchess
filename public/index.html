@@ -37,7 +37,8 @@ button:hover:not(:disabled){border-color:var(--am)}button:disabled{opacity:.4;cu
 <label><input type="checkbox" id="priv"> Private (hidden from the list, invite link only)</label>
 <button id="create">Create game</button>
 <h3>Have a code?</h3>
-<div style="display:flex;gap:6px"><input id="code" placeholder="Game code" maxlength="8" style="flex:1;min-width:0"><button id="join">Join</button></div><div id="msg"></div></div></div>
+<div style="display:flex;gap:6px"><input id="code" placeholder="Game code" maxlength="8" style="flex:1;min-width:0"><button id="join">Join</button></div><div id="msg"></div>
+<button id="rules">Rules (PDF)</button></div></div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script type="module">
 import*as T from'three';import{STLLoader}from'three/addons/loaders/STLLoader.js';
@@ -127,6 +128,7 @@ function renderLobby(list){const box=$('#list');box.textContent='';
     bt.textContent=mine?'Rejoin':'Join';bt.onclick=()=>joinGame(g.id);row.append(nm,sd,tm,bt);box.append(row)}}
 async function refreshLobby(){if($('#lobby').classList.contains('hide'))return;try{renderLobby((await (await fetch('/api/lobby',{cache:'no-store'})).json()).games||[])}catch{}}
 refreshLobby();setInterval(refreshLobby,3000);
+$('#rules').onclick=()=>window.open('rules/'+encodeURIComponent('PANZERCHESS 2.1.pdf'),'_blank');
 const h=location.hash.slice(1).toUpperCase();fit();setCam();
 if(h){$('#code').value=h;if(localStorage['pc'+h])enter({id:h,token:localStorage['pc'+h]})}
 // play

@@ -72,7 +72,7 @@ function act(g,s,{op,uid,tid}){
 function view(g,seat){return{id:g.id,you:seat,names:g.names,priv:g.priv,timer:g.timer,status:g.status,turn:g.turn,cur:g.cur,winner:g.winner,why:g.why,units:g.units,
   log:g.log.slice(-6),ev:g.ev,undo:!!(g.cur&&g.cur.n&&!g.undoUsed),deadline:g.deadline,now:Date.now(),online:[0,1].map(i=>g.clients.some(c=>c.seat===i))}}
 function send(g){for(const c of g.clients)c.res.write('data: '+JSON.stringify(view(g,c.seat))+'\n\n')}
-const MIME={'.html':'text/html','.stl':'model/stl','.js':'text/javascript','.css':'text/css'};
+const MIME={'.html':'text/html','.stl':'model/stl','.js':'text/javascript','.css':'text/css','.pdf':'application/pdf'};
 function handle(req,res){
   const url=new URL(req.url,'http://x'),q=url.searchParams;
   const json=(o,code=200)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(o))};
