@@ -1,0 +1,161 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Panzerchess</title>
+<style>
+:root{--bg:#1d2125;--pn:#2a2f34;--ink:#e8e4d8;--am:#e0a43a;--or:#d2691e;--bl:#5d86b8}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px Bahnschrift,"Arial Narrow",system-ui,sans-serif}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+#ui{position:fixed;top:10px;left:10px;width:230px;background:var(--pn);border:1px solid #444b52;padding:12px}
+#ui h2{margin:0 0 6px;font-size:18px;letter-spacing:.04em}
+button,select,input{font:inherit;background:#3a4147;color:var(--ink);border:1px solid #59626a;padding:7px 9px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--am)}button:disabled{opacity:.4;cursor:default}
+.g{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:8px 0}
+#end{width:100%;background:var(--am);color:#111;border:0;font-weight:700}
+#log{font-size:13px;color:#b9b4a6;margin-top:8px;min-height:60px}
+#bar{height:5px;background:#444b52;margin:6px 0}#bar i{display:block;height:100%;background:var(--am)}
+#lobby{position:fixed;inset:0;display:grid;place-items:center;background:rgba(29,33,37,.94)}
+#lobby>div{width:min(380px,92vw);max-height:96vh;overflow:auto;display:grid;gap:10px;align-content:start}#lobby h1{margin:0;font-size:34px;letter-spacing:.06em}#lobby h3{margin:6px 0 0;font-size:14px;letter-spacing:.08em;color:#b9b4a6;text-transform:uppercase}
+.row{display:flex;align-items:center;gap:8px;background:var(--pn);border:1px solid #444b52;padding:7px 9px;margin-bottom:4px}.row b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row small{color:#b9b4a6}
+.none{color:#b9b4a6;font-size:13px;padding:4px 0}#pl{font-size:14px;margin-bottom:6px}#msg{color:var(--am);min-height:1.2em}
+#res{position:fixed;inset:0;display:grid;place-items:center;background:rgba(20,22,25,.72)}#res div{background:var(--pn);border:1px solid var(--am);padding:26px 34px;text-align:center;display:grid;gap:12px;min-width:270px}#res h2{margin:0;font-size:34px;letter-spacing:.05em}#res p{margin:0}
+.hide{display:none!important}.o{color:var(--or)}.b{color:var(--bl)}
+</style></head><body>
+<div id="ui" class="hide"><h2 id="who"></h2><div id="pl"></div><div id="bar"><i></i></div><div id="pts"></div>
+<div class="g"><span></span><button data-op="f" title="W">Forward</button><span></span>
+<button data-op="l" title="Q">Hull ⟲</button><button data-op="b" title="S">Reverse</button><button data-op="r" title="E">Hull ⟳</button>
+<button data-op="tl" title="A">Turret ⟲</button><button data-op="fire" title="F">Fire</button><button data-op="tr" title="D">Turret ⟳</button></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px"><button id="end">End turn</button><button id="undo" disabled>Undo (Z)</button></div><div id="log"></div><div style="display:flex;gap:6px;margin-top:8px;align-items:center"><button id="snd">Sound: on</button><input id="vol" type="range" min="1" max="3" step="1" value="2" style="flex:1" title="Volume"></div>
+<label style="display:block;margin-top:8px">Zoom<input id="zoom" type="range" min="0.5" max="2.5" step="0.05" value="1" style="width:100%"></label>
+<button id="view" style="margin-top:8px">View: isometric</button></div>
+<div id="res" class="hide"><div><h2></h2><p></p><button id="again">New game</button><button id="close">View board</button></div></div>
+<div id="lobby"><div><h1>Panzerchess</h1>
+<input id="name" placeholder="Your name" maxlength="16" autocomplete="off">
+<h3>Open games</h3><div id="list"><div class="none">Loading…</div></div>
+<h3>Create a game</h3>
+<label>Turn timer <select id="timer"><option>30<option selected>60<option>90<option>120</select> seconds</label>
+<label>I play <select id="side"><option value="first">first (orange)<option value="second">second (blue)</select></label>
+<label><input type="checkbox" id="priv"> Private (hidden from the list, invite link only)</label>
+<button id="create">Create game</button>
+<h3>Have a code?</h3>
+<div style="display:flex;gap:6px"><input id="code" placeholder="Game code" maxlength="8" style="flex:1;min-width:0"><button id="join">Join</button></div><div id="msg"></div></div></div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import*as T from'three';import{STLLoader}from'three/addons/loaders/STLLoader.js';
+// ---- model config: edit if a barrel points backwards or a turret sits too high/low ----
+const SCALE=0.03,FLIP=0,TURRET_LIFT=0,LIFT_BY={LT:.183,MT:.240,HT:.245}, // LIFT_BY = per-tank turret height above the hull (turret base sits on the hull top); falls back to TURRET_LIFT
+PIVOT={LT:[0,2.66],MT:[0,1.91],HT:[0,1.91]}, // PIVOT = centre of the round hole in each hull (STL x,y); turrets rotate about it
+TURRET_SCALE={MT:1.25};
+const MX=x=>9.5-x; // board file -> scene x (mirrored so files a..j run left to right from each player's side)
+const FILES={LT:['LT_Hull','LT_Turret'],MT:['MT_Hull','MT_Turret'],HT:['HT_Hull','HT_Turret'],TD:['TD'],A:['Arty']};
+const $=s=>document.querySelector(s);let zoom=1,game=null,tok=null,id=null,sel=null,es=null,off=0,iso=true,seat=0;
+const SND={click:'click-sound',move:'tank-move-rotate',turret:'tank-turret-rotate',shot:'tank-shot',kill:'tank-destroyed',miss:'ricochet',end:'end-turn-sound',undo:'undo-sound'};
+const AUD={};for(const k in SND){AUD[k]=new Audio('sounds/'+SND[k]+'.wav');AUD[k].preload='auto'}
+let shown=0,snd=localStorage.pcSnd!=='0',vol=+(localStorage.pcVol||2),lastEv=null;const VOL=[0,.25,.6,1];
+function play(k,delay=0){if(!snd)return;setTimeout(()=>{const a=AUD[k].cloneNode();a.volume=VOL[vol];a.play().catch(()=>{})},delay)}
+const renderer=new T.WebGLRenderer({antialias:true});document.body.prepend(renderer.domElement);
+const scene=new T.Scene();scene.background=new T.Color(0x1d2125);
+scene.add(new T.HemisphereLight(0xffffff,0x555555,1.6));const sun=new T.DirectionalLight(0xffffff,2);sun.position.set(-6,14,-4);scene.add(sun);
+const cam=new T.OrthographicCamera(-1,1,1,-1,.1,100);
+function setCam(){const k=iso?1:0,s=seat?-1:1,cx=5,cz=6;
+  cam.position.set(cx-s*k*14,iso?16:24,cz-s*(iso?14:k*14+(seat?-.01:.01)));cam.up.set(0,1,0);if(!iso)cam.up.set(0,0,s);cam.lookAt(cx,0,cz);}
+function fit(){const w=innerWidth,h=innerHeight,v=iso?10.5:8.5,a=w/h;renderer.setSize(w,h);renderer.setPixelRatio(devicePixelRatio);
+  cam.left=-v*a;cam.right=v*a;cam.top=v;cam.bottom=-v;cam.zoom=zoom;cam.updateProjectionMatrix();}
+addEventListener('resize',fit);
+// board
+const dark=new T.MeshStandardMaterial({color:0x15181b}),FORT=['1,3','1,6','1,8','3,4','3,7','6,4','6,7','8,3','8,5','8,8'],TEETH=['4,0','6,0','4,1','6,1','3,10','5,10','3,11','5,11'];
+for(let x=0;x<10;x++)for(let y=0;y<12;y++){const k=x+','+y,t=new T.Mesh(new T.BoxGeometry(1,.1,1),new T.MeshStandardMaterial({color:(x+y)%2?0x9a9d8e:0xc9c8b6}));
+  t.position.set(MX(x),-.05,y+.5);t.userData.tile=1;scene.add(t);
+  if(FORT.includes(k))for(let i=0;i<12;i++){const a=i/12*Math.PI*2,b=new T.Mesh(new T.BoxGeometry(.22,.22,.22),dark);
+    const r=[[-1,-1],[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-.34],[1,.34],[-.34,1],[.34,-1]][i];b.position.set(MX(x)+r[0]*.4,.11,y+.5+r[1]*.4);scene.add(b)}
+  if(TEETH.includes(k))for(const[dx,dz]of[[-.25,-.25],[.25,-.2],[0,0],[-.25,.25],[.25,.25]]){const c=new T.Mesh(new T.ConeGeometry(.12,.28,4),dark);c.position.set(MX(x)+dx,.14,y+.5+dz);scene.add(c)}
+  if(k==='5,0'||k==='4,11')for(const[dx,dz]of[[-1,-1],[1,-1],[1,1],[-1,1]]){const c=new T.Mesh(new T.BoxGeometry(.24,.02,.24),dark);c.position.set(MX(x)+dx*.38,.01,y+.5+dz*.38);scene.add(c)}}
+// models
+const geo={},loader=new STLLoader(),need=Object.values(FILES).flat();
+await Promise.all(need.map(n=>new Promise(r=>loader.load('models/'+n+'.stl',g=>{g.rotateX(-Math.PI/2);g.scale(SCALE,SCALE,SCALE);if(n.endsWith('_Turret')){const q=PIVOT[n.slice(0,2)];g.translate(-q[0]*SCALE,0,q[1]*SCALE)}g.computeBoundingBox();g.computeVertexNormals();geo[n]=g;r()},0,()=>r()))));
+const mats=[0xd2691e,0x5d86b8].map(c=>new T.MeshStandardMaterial({color:c,flatShading:true,roughness:.6}));
+const meshes={};
+function tipOf(geo){const p=geo.attributes.position,mz=geo.boundingBox.max.z,v=new T.Vector3(),c=new T.Vector3();let n=0;
+  for(let i=0;i<p.count;i++){v.fromBufferAttribute(p,i);if(v.z>=mz-.015){c.add(v);n++}}return c.divideScalar(n||1)}
+// gunfire: 3 frames shown at the muzzle, pointing away from the gun
+const FR=[1,2,3].map(i=>new T.TextureLoader().load('sprites/gunfire-0'+i+'.png'));
+function flash(uid){const g=meshes[uid],m=g&&g.userData.muz;if(!m)return;const d0=g.userData;
+  g.position.set(d0.tp[0],0,d0.tp[1]);g.rotation.y=d0.th;if(d0.turret)d0.turret.rotation.y=d0.to;g.updateMatrixWorld(true);
+  const p=m.mesh.localToWorld(m.tip.clone()),d=m.mesh.localToWorld(m.tip.clone().add(m.dir)).sub(p).normalize(),size=0.6;
+  const a=p.clone().project(cam),b=p.clone().add(d).project(cam),dx=(b.x-a.x)*innerWidth,dy=(b.y-a.y)*innerHeight;
+  const spr=new T.Sprite(new T.SpriteMaterial({map:FR[0],transparent:true,depthTest:false,depthWrite:false}));
+  spr.scale.set(size,size,1);spr.position.copy(p).addScaledVector(d,size*.4);spr.renderOrder=9;
+  if(Math.hypot(dx,dy)>1)spr.material.rotation=Math.atan2(dy,dx);scene.add(spr);
+  setTimeout(()=>spr.material.map=FR[1],90);setTimeout(()=>spr.material.map=FR[2],180);setTimeout(()=>{scene.remove(spr);spr.material.dispose()},270)}
+function build(u){const g=new T.Group(),m=FILES[u.t],mat=mats[u.s].clone();
+  if(!geo[m[0]]){const b=new T.Mesh(new T.BoxGeometry(.6,.4,.8),mat);b.position.y=.2;g.add(b);g.userData={mat};return g}
+  const hull=new T.Mesh(geo[m[0]],mat),hb=geo[m[0]].boundingBox;hull.position.y=-hb.min.y+.04;g.add(hull);
+  if(m[1]&&geo[m[1]]){const t=new T.Mesh(geo[m[1]],mat),ts=TURRET_SCALE[u.t]||1;t.scale.setScalar(ts);const pv=PIVOT[u.t];t.position.set(pv[0]*SCALE,hull.position.y+(LIFT_BY[u.t]??TURRET_LIFT),-pv[1]*SCALE);g.add(t);g.userData.turret=t}
+  const tm=g.userData.turret;g.userData.muz=tm?{mesh:tm,tip:tipOf(geo[m[1]]),dir:new T.Vector3(0,0,1)}:u.t==='A'?{mesh:hull,tip:new T.Vector3(-.1,13.8,2.9).multiplyScalar(SCALE),dir:new T.Vector3(0,.367,.93)}:{mesh:hull,tip:tipOf(geo[m[0]]),dir:new T.Vector3(0,0,1)};
+  g.userData.mat=mat;g.traverse(o=>o.userData.uid=u.id);return g}
+const ang=a=>Math.atan2(Math.sin(a),Math.cos(a));
+function sync(){const ids=new Set(game.units.map(u=>u.id));
+  for(const k in meshes)if(!ids.has(k)){scene.remove(meshes[k]);delete meshes[k]}
+  for(const u of game.units){let g=meshes[u.id];if(!g){g=meshes[u.id]=build(u);g.userData.uid=u.id;g.traverse(o=>o.userData.uid=u.id);g.position.set(MX(u.x),0,u.y+.5);g.rotation.y=-u.h*Math.PI/4+FLIP*Math.PI;scene.add(g)}
+    g.userData.tp=[MX(u.x),u.y+.5];g.userData.th=-u.h*Math.PI/4+FLIP*Math.PI;g.userData.to=-u.o*Math.PI/4;
+    g.userData.mat.emissive.set(sel===u.id?0x553300:0)}}
+renderer.setAnimationLoop(()=>{for(const g of Object.values(meshes)){const d=g.userData;if(!d.tp)continue;
+  g.position.x+=(d.tp[0]-g.position.x)*.25;g.position.z+=(d.tp[1]-g.position.z)*.25;g.rotation.y+=ang(d.th-g.rotation.y)*.25;
+  if(d.turret)d.turret.rotation.y+=ang(d.to-d.turret.rotation.y)*.25}
+  renderer.render(scene,cam);tick()});
+// network
+const post=async(p,b)=>(await fetch('/api/'+p,{method:'POST',body:JSON.stringify(b)})).json();
+function connect(){if(es)es.close();lastEv=null;es=new EventSource(`/api/events?id=${id}&token=${tok}`);
+  es.onmessage=e=>{game=JSON.parse(e.data);const ev=game.ev;
+    if(ev){if(lastEv!==null&&ev.n>lastEv){if(ev.k==='kill'||ev.k==='miss'){play('shot');play(ev.k,500);flash(ev.u)}else play(ev.k)}lastEv=ev.n}else if(lastEv===null)lastEv=0;
+    off=game.now-Date.now();seat=game.you;if(!game.cur&&sel&&!game.units.some(u=>u.id===sel))sel=null;
+    if(game.cur&&game.turn===seat)sel=game.cur.id;setCam();sync();ui()};
+  es.onerror=async()=>{if(es.readyState!==2)return;const r=await post('act',{id,token:tok,op:'ping'}).catch(()=>null);
+    if(r&&r.error==='Game not found'){delete localStorage['pc'+id];location.href=location.pathname;return}setTimeout(connect,2000)}}
+function enter(r){if(r.error){$('#msg').textContent=r.error;return}id=r.id;tok=r.token;localStorage['pc'+id]=tok;location.hash=id;
+  $('#lobby').classList.add('hide');$('#ui').classList.remove('hide');fit();connect()}
+const getName=()=>{const v=$('#name').value.trim();if(!v){$('#msg').textContent='Enter your name first';$('#name').focus();return null}localStorage.pcName=v;return v};
+$('#name').value=localStorage.pcName||'';
+$('#create').onclick=async()=>{const name=getName();if(!name)return;enter(await post('create',{name,timer:+$('#timer').value,side:$('#side').value,priv:$('#priv').checked}))};
+async function joinGame(c){c=String(c||'').trim().toUpperCase();if(!c){$('#msg').textContent='Enter a game code';return}
+  if(localStorage['pc'+c])return enter({id:c,token:localStorage['pc'+c]}); // your own game / reconnect
+  const name=getName();if(!name)return;const r=await post('join',{id:c,name});if(r.error)refreshLobby();enter(r)}
+$('#join').onclick=()=>joinGame($('#code').value);
+function renderLobby(list){const box=$('#list');box.textContent='';
+  if(!list.length){const d=document.createElement('div');d.className='none';d.textContent='No open games right now — create one below.';box.append(d);return}
+  for(const g of list){const row=document.createElement('div'),nm=document.createElement('b'),sd=document.createElement('span'),tm=document.createElement('small'),bt=document.createElement('button'),mine=!!localStorage['pc'+g.id];
+    row.className='row';nm.textContent=g.name+(mine?' (you)':'');sd.className=g.side==='second'?'b':'o';sd.textContent=g.side==='second'?'Blue':'Orange';tm.textContent=g.timer+'s';
+    bt.textContent=mine?'Rejoin':'Join';bt.onclick=()=>joinGame(g.id);row.append(nm,sd,tm,bt);box.append(row)}}
+async function refreshLobby(){if($('#lobby').classList.contains('hide'))return;try{renderLobby((await (await fetch('/api/lobby',{cache:'no-store'})).json()).games||[])}catch{}}
+refreshLobby();setInterval(refreshLobby,3000);
+const h=location.hash.slice(1).toUpperCase();fit();setCam();
+if(h){$('#code').value=h;if(localStorage['pc'+h])enter({id:h,token:localStorage['pc'+h]})}
+// play
+async function act(op,tid){if(!game||game.status!=='play'||game.turn!==seat)return;if(!sel&&op!=='undo'){$('#log').textContent='Click one of your tanks first';return}
+  const r=await post('act',{id,token:tok,uid:sel,op,tid});if(r.error)$('#log').textContent=r.error}
+document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>act(b.dataset.op));$('#end').onclick=()=>act('end');
+$('#view').onclick=()=>{iso=!iso;$('#view').textContent='View: '+(iso?'isometric':'top-down');setCam();fit()};
+$('#zoom').oninput=e=>{zoom=+e.target.value;fit()};
+addEventListener('wheel',e=>{if(e.target.tagName==='CANVAS'){zoom=Math.min(2.5,Math.max(.5,zoom*(e.deltaY<0?1.1:.9)));$('#zoom').value=zoom;fit()}},{passive:true});
+$('#undo').onclick=()=>act('undo');
+$('#snd').onclick=()=>{snd=!snd;localStorage.pcSnd=snd?1:0;$('#snd').textContent='Sound: '+(snd?'on':'off')};
+$('#snd').textContent='Sound: '+(snd?'on':'off');$('#vol').value=vol;
+$('#vol').oninput=e=>{vol=+e.target.value;localStorage.pcVol=vol;play('click')};
+const KEY={z:'undo',w:'f',s:'b',q:'l',e:'r',a:'tl',d:'tr',f:'fire',Enter:'end'};
+addEventListener('keydown',e=>{if(KEY[e.key]&&e.target.tagName!=='INPUT')act(KEY[e.key])});
+const ray=new T.Raycaster();
+renderer.domElement.onpointerdown=e=>{if(!game)return;ray.setFromCamera(new T.Vector2(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1),cam);
+  const hit=ray.intersectObjects(Object.values(meshes),true)[0];if(!hit)return;const u=game.units.find(v=>v.id===hit.object.userData.uid);if(!u)return;
+  if(u.s===seat){if(!game.cur||game.cur.id===u.id){sel=u.id;play('click')}sync()}else if(sel)act('fire',u.id)};
+function ui(){const g=game,mine=g.turn===seat;
+  $('#who').innerHTML=g.status==='waiting'?`Code <b>${g.id}</b>`:g.status==='over'?`<span class="${g.winner?'b':'o'}">${g.winner?'Blue':'Orange'}</span> wins`:`<span class="${g.turn?'b':'o'}">${g.turn?'Blue':'Orange'}</span> to move${mine?' (you)':''}`;
+  const c=g.cur&&mine?g.cur:null,u=g.units.find(v=>v.id===(c?c.id:sel)),S={A:[1,2,0],LT:[3,3,3],MT:[2,3,2],HT:[2,2,1],TD:[2,1,0]}[u&&u.t];
+  const N=g.names||['',''],pl=$('#pl');pl.textContent='';[0,1].forEach(i=>{const sp=document.createElement('span');sp.className=i?'b':'o';sp.textContent=(N[i]||'waiting…')+(i===seat?' (you)':'');if(i)pl.append(' vs ');pl.append(sp)});
+  $('#pts').textContent=g.status==='waiting'?(g.priv?'Private game: share this page address (with #'+g.id+') to invite an opponent.':'Waiting for an opponent. Your game is listed in the lobby, or share this page address (with #'+g.id+').'):
+    u&&mine?`${u.t}: moves ${c?(c.ex?0:S[0]-c.sp):S[0]} · hull ${S[1]-(c?c.ta:0)} · turret ${S[2]-(c?c.tu:0)} · ${c&&c.fired?'fired':'gun ready'}`:mine?'Click one of your tanks':'';
+  document.querySelectorAll('button[data-op],#end').forEach(b=>b.disabled=!mine||g.status!=='play');$('#undo').disabled=!(mine&&g.status==='play'&&g.undo);result(g);
+  $('#log').innerHTML=g.log.slice().reverse().join('<br>')+(g.online[seat^1]||g.status==='waiting'?'':'<br><i>Opponent disconnected</i>')}
+$('#again').onclick=()=>{location.href=location.pathname};$('#close').onclick=()=>$('#res').classList.add('hide');
+function result(g){if(g.status!=='over'||shown)return;shown=1;const w=g.winner===seat;
+  $('#res h2').textContent=w?'Victory':'Defeat';$('#res h2').className=g.winner?'b':'o';
+  $('#res p').textContent=(g.winner?'Blue':'Orange')+(g.names&&g.names[g.winner]?' ('+g.names[g.winner]+')':'')+' wins: '+g.why+'.';$('#res').classList.remove('hide')}
+function tick(){if(!game||game.status!=='play')return;const l=Math.max(0,game.deadline-(Date.now()+off));$('#bar i').style.width=l/(game.timer*10)+'%'}
+</script></body></html>
